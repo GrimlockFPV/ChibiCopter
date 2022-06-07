@@ -27,7 +27,7 @@
 const float Butter2_3_ACoeffs[2] = {0.74779f, -0.27221f};
 const float Butter2_3_BCoeffs[3] = {0.13111f, 0.26221f, 0.13111f};
 
-const float Butter2_2_ACoeffs[2] = {1.14298f, -0.41280f};
+const float Butter2_2_ACoeffs[2] = {1.14298f, -0.41280};
 const float Butter2_2_BCoeffs[3] = {0.067455f, 0.134911f, 0.067455f};
 
 const float Butter2_15_ACoeffs[2] = {1.34897f, -0.51398f};
@@ -45,7 +45,7 @@ const float Butter2_03_BCoeffs[3] = {0.0020806f, 0.0041611f, 0.0020806f};
 const float Butter2_04_ACoeffs[2] = {1.82269f, -0.83718f};
 const float Butter2_04_BCoeffs[3] = {0.0036217f, 0.0072434f, 0.0036217f};
 
-const float Butter2_05_ACoeffs[2] = {1.77863f, -0.80080f};
+const float Butter2_05_ACoeffs[2] = {1.77863f, -0.80080};
 const float Butter2_05_BCoeffs[3] = {0.0055427f, 0.0110854f, 0.0055427f};
 
 const float Butter2_16_ACoeffs[2] = {1.30729f, -0.49181f};
@@ -84,4 +84,22 @@ int16_t Filter1stOrder(int16_t NewValue, float *Ins, float *Outs,
   Outs[0] = acc;
   return (int16_t)acc;
 }
+
+#define ACC_BUFFER_SIZE 10
+float rollingBuffer[ACC_BUFFER_SIZE] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+
+float FilterMedian(float NewValue) {
+
+  float total = 0;
+
+  // shift all the numbers down and
+  for (int i = ACC_BUFFER_SIZE; i > 0; i--) {
+    rollingBuffer[i-1] = rollingBuffer[i];
+  }
+  rollingBuffer[ACC_BUFFER_SIZE] = NewValue;
+  total = rollingBuffer[4] + rollingBuffer[5];
+
+  return total / 2;
+}
+
 

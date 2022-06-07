@@ -26,6 +26,7 @@ int16_t Filter2ndOrder(int16_t NewValue, float *Ins, float *Outs,
 
 int16_t Filter1stOrder(int16_t NewValue, float *Ins, float *Outs,
                        const float *ACoeffs, const float *BCoeffs);
+float FilterMedian(float NewValue);
 
 extern const float Butter2_3_ACoeffs[2];
 extern const float Butter2_3_BCoeffs[3];

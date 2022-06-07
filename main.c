@@ -24,13 +24,9 @@
 #include "chprintf.h"
 #include "drivers/mpu9250.h"
 #include "drivers/kalman.h"
+#include "drivers/GNSS.h"
+#include "lcd.h"
 
-#define LINE_MPU_INT       PAL_LINE(GPIOB, 12U)
-#define LINE_LED_BLUE      PAL_LINE(GPIOB, 7U)
-#define LINE_LED_RED       PAL_LINE(GPIOB, 14U)
-#define CHP (BaseSequentialStream*) &LPSD1
-#define RC_CHANNEL_NUM     6
-#define RAD_TO_DEG         (180 / 3.14f)
 
 void InitHardware(void);
 void Kalman_config(void);
@@ -38,16 +34,17 @@ void Kalman_update(void);
 
 static binary_semaphore_t MPUDataReady; /* Semaphore fro the MPU thread */
 extern int16_t GyroData[3];
-extern int16_t AccelData[3];
+extern float AccelData[3];
 uint16_t mpuCycles = 0;
-enum { CH_1, CH_2, CH_3, CH_4, CH_5, CH_6 };
 icucnt_t PulseWidth, PulsePeriod;
 uint32_t channel[RC_CHANNEL_NUM];
 uint8_t channel_select_counter;
 
 Kalman kalmanX; // Create the Kalman instances
 Kalman kalmanY;
-
+GNSS_StateHandle GNSS_Handle;
+RTCDateTime timespec;
+float timer;
 float gyroXangle, gyroYangle; // Angle calculate using the gyro only
 float compAngleX, compAngleY; // Calculated angle using a complementary filter
 float kalAngleX, kalAngleY; // Calculated angle using a Kalman filter
@@ -88,13 +85,12 @@ static void mpu_isr_cb(void *arg) {
 
 }
 
-/* MPUThread:
+/*
+ * MPUThread:
  * Main thread that runs the control loop
  * Waits for new MPU Values, gets the current RC Command
  * calls PID, Mixer an sets the values to the motors/ESCs
- *
  */
-
 static THD_WORKING_AREA(waThread2, 1024);
 static THD_FUNCTION(Thread2, arg) {
 
@@ -129,7 +125,8 @@ static THD_FUNCTION(Thread2, arg) {
   }
 }
 
-/*  "Period" callback and icuGetPeriod() f'n
+/*
+ *   "Period" callback and icuGetPeriod() f'n
  *   is really measuring the active high pulse width
  *   (what we need to decode PPM receiver signals)
  */
@@ -198,9 +195,10 @@ static PWMConfig pwmcfg = {
   0
 };
 
-/*   ICU_PWM Thread:
- *   Input capture of receiver signals and
- *   PWM generation of ESC driver signals
+/*
+ *   ICU_PWM Thread:
+ *     Input capture of receiver signals and
+ *     PWM generation of ESC driver signals
  */
 static THD_WORKING_AREA(waThread3, 1024);
 static THD_FUNCTION(Thread3, arg) {
@@ -261,6 +259,81 @@ static THD_FUNCTION(Thread5, arg) {
     Kalman_update();
   }
 }
+
+void txend1(UARTDriver *uartp);
+void txend2(UARTDriver *uartp);
+void rxend(UARTDriver *uartp);
+void rxchar(UARTDriver *uartp, uint16_t c);
+void rxerr(UARTDriver *uartp, uartflags_t e);
+
+/*
+ * UART driver configuration structure.
+ */
+UARTConfig uart_cfg_1 = {
+  NULL,
+  NULL,
+  NULL,
+  NULL,
+  NULL,
+  NULL,
+  9600,
+  0,
+  USART_CR2_LINEN,
+  0
+};
+/*
+ *   GNSS Thread:
+ *     UART communication to U-Blox
+ */
+static THD_WORKING_AREA(waThread6, 1024);
+static THD_FUNCTION(Thread6, arg) {
+
+  RTCDateTime time;
+  uint32_t dt;
+  (void)arg;
+  chRegSetThreadName("GNSS_Thread");
+
+
+  GNSS_Init(&GNSS_Handle);
+  chThdSleepMilliseconds(1000);
+  GNSS_LoadConfig(&GNSS_Handle);
+  rtcGetTime(&RTCD1, &time);
+
+  uint32_t Timer = time.millisecond;
+  chThdSleepMilliseconds(1000);
+
+  while (TRUE) {
+    rtcGetTime(&RTCD1, &time);
+    chprintf(CHP, "top of loop time = %d\r\n", time.millisecond);
+
+    if ((time.millisecond - Timer) > 1000) {
+      GNSS_GetUniqID(&GNSS_Handle);
+      GNSS_ParseBuffer(&GNSS_Handle);
+      chThdSleepMilliseconds(250);
+      GNSS_GetPVTData(&GNSS_Handle);
+      GNSS_ParseBuffer(&GNSS_Handle);
+      chprintf(CHP, "Day: %d-%d-%d \r\n", GNSS_Handle.day, GNSS_Handle.month,GNSS_Handle.year);
+      chprintf(CHP, "Time: %d:%d:%d \r\n", GNSS_Handle.hour, GNSS_Handle.min,GNSS_Handle.sec);
+      chprintf(CHP, "Status of fix: %d \r\n", GNSS_Handle.fixType);
+      chprintf(CHP, "Latitude: %f \r\n", GNSS_Handle.fLat);
+      chprintf(CHP, "Longitude: %f \r\n",(float) GNSS_Handle.lon / 10000000.0);
+      chprintf(CHP, "Height above ellipsoid: %d \r\n", GNSS_Handle.height);
+      chprintf(CHP, "Height above mean sea level: %d \r\n", GNSS_Handle.hMSL);
+      chprintf(CHP, "Ground Speed (2-D): %d \r\n", GNSS_Handle.gSpeed);
+      chprintf(CHP, "Unique ID: %04X %04X %04X %04X %04X \n\r",
+              GNSS_Handle.uniqueID[0], GNSS_Handle.uniqueID[1],
+              GNSS_Handle.uniqueID[2], GNSS_Handle.uniqueID[3],
+              GNSS_Handle.uniqueID[4], GNSS_Handle.uniqueID[5]);
+
+      rtcGetTime(&RTCD1, &time);
+      dt = time.millisecond - Timer;
+      chprintf(CHP, "delta t = %d\r\n", dt);
+      Timer = time.millisecond;
+    }
+    chThdSleepMilliseconds(250);
+  }
+}
+
 /*   Stats/Log Thread:
  *   Debug / JLink output
  */
@@ -272,7 +345,7 @@ static THD_FUNCTION(Thread4, arg) {
   uint8_t start = 0;
 
   while (TRUE) {
-    chprintf(CHP, "Roll: %.3d  Pitch: %.3d  Yaw: %.3d\tAccX: %.3d  AccY: %.3d  AccZ: %.3d\r\n",
+    chprintf(CHP, "Roll: %.3d  Pitch: %.3d  Yaw: %.3d\tAccX: %.3f  AccY: %.3f  AccZ: %.3f\r\n",
                                GyroData[ROLL], GyroData[PITCH], GyroData[YAW], AccelData[ROLL], AccelData[PITCH], AccelData[YAW]);
     chThdSleepMilliseconds(250);
     /*
@@ -322,46 +395,76 @@ static THD_FUNCTION(Thread4, arg) {
  * Application entry point.
  */
 int main(void) {
+  static char string[40];
+  RTCDateTime time;
+  //uint32_t dt;
 
-  /*
-   * System initializations.
-   * - HAL initialization, this also initializes the configured device drivers
-   *   and performs the board-specific initializations.
-   * - Kernel initialization, the main() function becomes a thread and the
-   *   RTOS is active.
-   */
   halInit();
   chSysInit();
   InitHardware();
+  rtcGetTime(&RTCD1, &time);
+
+  uint32_t Timer = time.millisecond;
+  chThdSleepMilliseconds(2000);
 
   // Creates the blinker thread: Lowest prio
   chThdCreateStatic(waThread1, sizeof(waThread1), LOWPRIO, Thread1, NULL);
 
   // Start MPU Thread: Middle prio
-  chThdCreateStatic(waThread2, sizeof(waThread2), NORMALPRIO+1, Thread2, NULL);
+  //chThdCreateStatic(waThread2, sizeof(waThread2), NORMALPRIO+1, Thread2, NULL);
 
   // Start PWM_ICU Thread: Highest prio
   //chThdCreateStatic(waThread3, sizeof(waThread3), NORMALPRIO+2, Thread3, NULL);
 
   // Start Stats Thread: Low prio
-  chThdCreateStatic(waThread4, sizeof(waThread4), NORMALPRIO, Thread4, NULL);
+  //chThdCreateStatic(waThread4, sizeof(waThread4), NORMALPRIO, Thread4, NULL);
 
-  // Start EKF Thread: Low prio
+  // Start EKF Thread: mid prio
   //chThdCreateStatic(waThread5, sizeof(waThread5), NORMALPRIO, Thread5, NULL);
 
+  // Start GNSS Thread: mid prio
+  //chThdCreateStatic(waThread6, sizeof(waThread6), NORMALPRIO, Thread6, NULL);
+
   // Normal main() thread activity, it does nothing.
-  while (TRUE)
+  /*while (TRUE)
     chThdSleep(TIME_INFINITE);
   return 0;
+  */
+
+  /* Writing some default strings. */
+  lcdWriteString(&LCDD1, "ChibiCopter by  Wayne Brenckle", 0);
+  rtcGetTime(&RTCD1, &time);
+  chsnprintf(string, sizeof(string), "Delta time is   %d", time.millisecond - Timer);
+
+  lcdWriteString(&LCDD1, string, 40);
+  chThdSleepMilliseconds(2000);
+
+  /* Performing shift continuously. */
+  while (true) {
+    unsigned ii;
+    for(ii = 0; ii < 16; ii++){
+      lcdDoDisplayShift(&LCDD1, LCD_LEFT);
+      chThdSleepMilliseconds(50);
+    }
+    chThdSleepMilliseconds(2000);
+    for(ii = 0; ii < 16; ii++){
+      lcdDoDisplayShift(&LCDD1, LCD_RIGHT);
+      chThdSleepMilliseconds(50);
+    }
+    chThdSleepMilliseconds(2000);
+
+  }
+
 
 }
 
 void InitHardware() {
 
-  sdStart(&LPSD1, NULL);   // Activates the serial driver (LPUART1) using the driver default configuration.
-  /*
-   * SPI1, TIM4, TIM3 pins setup.
-   */
+
+  /* SPI1, TIM4, TIM3 pins setup. */
+  palSetPadMode(GPIOA, 2, PAL_MODE_ALTERNATE(7));                               /* UART2 TX/GPS  */
+  palSetPadMode(GPIOA, 3, PAL_MODE_ALTERNATE(7));                               /* UART2 RX/GPS  */
+  palSetPadMode(GPIOA, 4, PAL_MODE_OUTPUT_PUSHPULL | PAL_STM32_OSPEED_HIGHEST); /* SPI1/MPU CS   */
   palSetPadMode(GPIOB, 3, PAL_MODE_ALTERNATE(5) | PAL_STM32_OSPEED_HIGHEST);    /* SPI1 SCK.     */
   palSetPadMode(GPIOB, 4, PAL_MODE_ALTERNATE(5) | PAL_STM32_OSPEED_HIGHEST);    /* SPI1 MISO.    */
   palSetPadMode(GPIOB, 5, PAL_MODE_ALTERNATE(5) | PAL_STM32_OSPEED_HIGHEST);    /* SPI1 MOSI.    */
@@ -369,18 +472,26 @@ void InitHardware() {
   palSetPadMode(GPIOC, 6, PAL_MODE_ALTERNATE(2));                               /* TIM3 CH1 PWM  */
   palSetPadMode(GPIOC, 7, PAL_MODE_ALTERNATE(2));                               /* TIM3 CH2 PWM  */
   palSetPadMode(GPIOC, 8, PAL_MODE_ALTERNATE(2));                               /* TIM3 CH3 PWM  */
-  palSetPadMode(GPIOC, 9, PAL_MODE_ALTERNATE(2));                               /* TIM3 CH4 PWM  */
-  palSetPadMode(GPIOA, 4, PAL_MODE_OUTPUT_PUSHPULL | PAL_STM32_OSPEED_HIGHEST); /* SPI1/MPU CS   */
-  palSetPad(GPIOA, 4);
-  palSetLineMode(LINE_MPU_INT, PAL_MODE_INPUT);                                 /* MPU INTERUPT  */
+  palSetPadMode(GPIOC, LINE_MPU_INT, PAL_MODE_INPUT);                           /* MPU INTERUPT  */
 
+  /* Configuring RS and E PIN as Output Push Pull. */
+  palSetLineMode(LINE_RS, PAL_MODE_OUTPUT_PUSHPULL | PAL_STM32_OSPEED_HIGHEST);
+  palSetLineMode(LINE_E, PAL_MODE_OUTPUT_PUSHPULL | PAL_STM32_OSPEED_HIGHEST);
+
+  palSetPad(GPIOA, 4);
   palClearLine(LINE_LED_RED);
   palClearLine(LINE_LED_GREEN);
   palClearLine(LINE_LED_BLUE);
+
+  sdStart(&LPSD1, NULL);   // Activates the serial driver (LPUART1) using the driver default configuration.
+  uartStart(&UARTD2, &uart_cfg_1);  // start the serial UART driver to talk to the UBLOX GNSS unit
+
+  /* Initializing LDC driver. */
+  lcdInit();
+  lcdStart(&LCDD1, &lcdcfg);
+
 }
 
-RTCDateTime timespec;
-float timer;
 
 void Kalman_config(void) {
 
@@ -466,4 +577,5 @@ void Kalman_update(void) {
   chprintf(CHP, "kalYdeg: %f\r\n", kalAngleY);
 
 }
+
 

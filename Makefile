@@ -89,7 +89,7 @@ PROJECT = ch
 MCU  = cortex-m4
 
 # Imported source files and paths.
-CHIBIOS  := ../../../../Dev/ChibiOS_21.11.1
+CHIBIOS  := ../../Dev/ChibiOS_21.11.1
 CONFDIR  := ./cfg
 BUILDDIR := ./build
 DEPDIR   := ./.dep
@@ -104,6 +104,7 @@ include $(CHIBIOS)/os/hal/ports/STM32/STM32L4xx/platform.mk
 include $(CHIBIOS)/os/hal/boards/ST_NUCLEO144_L496ZG/board.mk
 include $(CHIBIOS)/os/hal/osal/rt-nil/osal.mk
 include $(CHIBIOS)/os/hal/lib/streams/streams.mk
+include ./userlib/user.mk
 # RTOS files (optional).
 include $(CHIBIOS)/os/rt/rt.mk
 include $(CHIBIOS)/os/common/ports/ARMv7-M/compilers/GCC/mk/port.mk
@@ -124,7 +125,8 @@ CSRC = $(ALLCSRC) \
        main.c     \
        filter.c   \
        drivers/mpu9250.c \
-	   drivers/kalman.c
+	   drivers/kalman.c \
+	   drivers/GNSS.c 
 
 # C++ sources that can be compiled in ARM or THUMB mode depending on the global
 # setting.

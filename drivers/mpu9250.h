@@ -62,6 +62,7 @@
 #define MPU9250_SIGNAL_PATH_RESET   104   // R/W
 #define MPU9250_USER_CTRL           106   // R/W
 #define MPU9250_PWR_MGMT_1          107   // R/W
+#define MPU9250_PWR_MGMT_2          108   // R/W
 #define MPU9250_WHO_AM_I            117   // R
 
 /*
@@ -77,7 +78,14 @@
 #define GYRO_LPF_10           5
 #define GYRO_LPF_5            6
 #define GYRO_LPF_3600         7
+
+#define ACCEL_LPF_218         1
+#define ACCEL_LPF_99          2
 #define ACCEL_LPF_44          3
+#define ACCEL_LPF_21          4
+#define ACCEL_LPF_10          5
+#define ACCEL_LPF_5           6
+#define ACCEL_LPF_420         7
 
 #define GYRO_RANGE_250        (0<<3)
 #define GYRO_RANGE_500        (1<<3)
@@ -106,13 +114,13 @@
 #endif
 
 #if (ACCEL_RANGE == ACCEL_RANGE_16G)
-#define ACCEL_SCALE_INT        (-2048)
+#define ACCEL_SCALE        (-2048.0f)
 #elif (ACCEL_RANGE == ACCEL_RANGE_8G)
-#define ACCEL_SCALE_INT        (-4096)
+#define ACCEL_SCALE        (-4096.0f)
 #elif (ACCEL_RANGE == ACCEL_RANGE_4G)
-#define ACCEL_SCALE_INT        (-8192)
+#define ACCEL_SCALE        (-8192.0f)
 #elif (ACCEL_RANGE == ACCEL_RANGE_2G)
-#define ACCEL_SCALE_INT        (-16384)
+#define ACCEL_SCALE        (-16384.0f)
 #else
 #error  Wrong Accel range
 #endif
@@ -148,39 +156,35 @@
 #define PITCH          1
 #define YAW            2
 
-struct SensorGyroData {
+struct SensorData {
   int16_t roll;
   int16_t pitch;
   int16_t yaw;
+  float fRoll;
+  float fPitch;
+  float fYaw;
 };
 
-struct SensorAccelData {
-  int16_t roll;
-  int16_t pitch;
-  int16_t yaw;
-};
 
 enum {
   SPI_DUMMY_BYTE = 0,
-  GYRO_XOUT_H,
-  GYRO_XOUT_L,
-  GYRO_YOUT_H,
-  GYRO_YOUT_L,
-  GYRO_ZOUT_H,
-  GYRO_ZOUT_L,
-  GYRO_DATA_SIZE,
-};
-
-enum {
-  SPI_DUM_DUM_BYTE = 0,
   ACCEL_XOUT_H,
   ACCEL_XOUT_L,
   ACCEL_YOUT_H,
   ACCEL_YOUT_L,
   ACCEL_ZOUT_H,
   ACCEL_ZOUT_L,
-  ACCEL_DATA_SIZE,
+  TEMP_XOUT_H,
+  TEMP_XOUT_L,
+  GYRO_XOUT_H,
+  GYRO_XOUT_L,
+  GYRO_YOUT_H,
+  GYRO_YOUT_L,
+  GYRO_ZOUT_H,
+  GYRO_ZOUT_L,
+  IMU_DATA_SIZE,
 };
+
 
 int MPUInit(void);
 bool GetMPUData(void);
